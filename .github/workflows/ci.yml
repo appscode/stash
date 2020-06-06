@@ -61,19 +61,38 @@ jobs:
     needs: build
     strategy:
       matrix:
-        k8s: [v1.11.10, v1.12.10, v1.14.10, v1.16.9, v1.18.2]
+        cluster:
+        - {"version": "v1.11.10", "config": "kind.yaml"}
+        - {"version": "v1.12.10", "config": "kind.yaml"}
+        - {"version": "v1.14.10", "config": "kind.yaml"}
+        - {"version": "v1.16.9", "config": "kind.yaml"}
+        - {"version": "v1.18.2", "config": "kind.yaml"}
+        - {"version": "v1.18.2", "config": "kind-psp.yaml"}
+
     steps:
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v1
 
-    - name: Create Kubernetes ${{ matrix.k8s }} cluster
+    - name: Create Kubernetes ${{ matrix.cluster.version }} cluster
       id: kind
       uses: engineerd/setup-kind@v0.3.0
       with:
         version: v0.7.0
-        config: hack/kubernetes/kind.yaml
-        image: kindest/node:${{ matrix.k8s }}
+        config: hack/kubernetes/${{ matrix.cluster.config }}
+        image: kindest/node:${{ matrix.cluster.version }}
+
+    - name: Setup PSP
+      id: psp
+      if: matrix.cluster.config == 'kind-psp.yaml'
+      run: |
+        echo "create standard pod security policies"
+        kubectl apply -f https://github.com/appscodelabs/tasty-kube/raw/master/psp/privileged-psp.yaml
+        kubectl apply -f https://github.com/appscodelabs/tasty-kube/raw/master/psp/baseline-psp.yaml
+        kubectl apply -f https://github.com/appscodelabs/tasty-kube/raw/master/psp/restricted-psp.yaml
+        echo "create roles and rolebindings for psp"
+        kubectl apply -f https://github.com/appscodelabs/tasty-kube/raw/master/kind/psp/cluster-roles.yaml
+        kubectl apply -f https://github.com/appscodelabs/tasty-kube/raw/master/kind/psp/role-bindings.yaml
 
     - name: Prepare cluster for testing
       id: local-path
@@ -83,10 +102,10 @@ jobs:
         REGISTRY_SECRET: regcred
       run: |
         echo "waiting for nodes to be ready ..."
-        kubectl wait --for=condition=Ready nodes --all --timeout=5m
+        kubectl wait --for=condition=Ready nodes --all --timeout=10m
         kubectl get nodes
         echo
-        kubectl version
+        kubectl version --short
         echo
         echo "create docker-registry secret"
         kubectl create secret docker-registry ${REGISTRY_SECRET} --namespace=kube-system --docker-server=https://index.docker.io/v1/ --docker-username=${USERNAME} --docker-password=${DOCKER_TOKEN}
